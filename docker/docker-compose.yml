@@ -2,9 +2,9 @@
 version: '3.8'
 services:
   search-visualizer-service:
-    build: .
+    build: ..
     ports:
-      - "${FLASK_APP_PORT}:${FLASK_APP_PORT}"
+      - "5000:5000"
     environment:
       - MONGO_URI
       - MONGO_DB_NAME
@@ -15,20 +15,6 @@ services:
       - SCHEDULE_QUEUE
       - AUTH_SERVICE_URL
       - FLASK_APP_PORT
-    depends_on:
-      - mongo
-      - rabbitmq
-
-#  mongo:
-#    image: mongo
-#    ports:
-#      - "27017:27017"
-#
-#  rabbitmq:
-#    image: "rabbitmq:3-management"
-#    ports:
-#      - "15672:15672"
-#      - "5672:5672"
 
 networks:
   default:
