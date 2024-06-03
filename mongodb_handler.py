@@ -17,13 +17,17 @@ PRODUCT_SERVICE_URL = os.getenv('PRODUCT_SERVICE_URL')
 
 
 def save_for_later_processing(product_id):
-    response = requests.get(f'{PRODUCT_SERVICE_URL}/products-es/{product_id}', headers={
-        "Content-Type": "application/json"
-    })
+    # response = requests.get(f'{PRODUCT_SERVICE_URL}/products-es/{product_id}', headers={
+    #     "Content-Type": "application/json"
+    # })
+    #
+    # if response.status_code != 200:
+    #     print(f"Failed to fetch product details for product ID: {product_id}")
+    #     return
 
     pretrain_product.update_one(
         {"product_id": product_id},
-        {"$set": {"product_id": product_id, "images": response.json()['images']}},
+        {"$set": {"product_id": product_id}},
         upsert=True
     )
 
@@ -61,6 +65,10 @@ def get_trained_products():
     return trained_product.find()
 
 
+def count_trained_products():
+    return trained_product.count_documents({})
+
+
 # def update_product_as_trained(product_ids, f):
 #     features_collection.update_many({
 #         "product_id": {"$in": product_ids}
@@ -68,7 +76,8 @@ def get_trained_products():
 
 
 def update_product_as_trained(products):
-    pretrain_product.delete_many({"product_id": {"$in": [product['product_id'] for product in products]}})
+    product_ids = [str(product['product_id']) for product in products]
+    pretrain_product.delete_many({"product_id": {"$in": product_ids}})
     for product in products:
         trained_product.update_one(
             {"product_id": product['product_id']},

@@ -1,11 +1,21 @@
 import os
-import tensorflow as tf
+
+os.environ['XLA_FLAGS'] = '--xla_gpu_strict_conv_algorithm_picker=false'
+
 
 os.environ['CUDA_DIR'] = '/opt/cuda'
 os.environ['XLA_FLAGS'] = '--xla_gpu_cuda_data_dir=/opt/cuda'
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=2'
 
+import tensorflow as tf
 print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+physical_devices = tf.config.list_physical_devices('GPU')
+try:
+  tf.config.experimental.set_memory_growth(physical_devices[0], True)
+except:
+  # Invalid device or cannot modify virtual devices once initialized.
+  pass
+
 
 import threading
 from dotenv import load_dotenv

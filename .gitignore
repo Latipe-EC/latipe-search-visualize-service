@@ -1,0 +1,4 @@
+resnet50_model.weights.keras
+.idea
+.venv
+img

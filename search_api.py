@@ -1,12 +1,13 @@
 # search_api.py
 
-from flask import Flask, request, jsonify
 import os
 
-from model_utils import extract_features
+from flask import Flask, request, jsonify
 from pymongo import MongoClient
 from sklearn.neighbors import NearestNeighbors
-from rabbitmq_consumer import  get_product_id, get_product_features
+
+from model_utils import extract_features
+from rabbitmq_consumer import get_product_id, get_product_features
 
 app = Flask(__name__)
 

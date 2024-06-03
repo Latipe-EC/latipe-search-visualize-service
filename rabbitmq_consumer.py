@@ -1,14 +1,18 @@
 # rabbitmq_consumer.py
 import json
 import os
+import uuid
+from io import BytesIO
 
 import numpy as np
 import pika
+import requests
+from PIL import Image
 from dotenv import load_dotenv
+from keras.preprocessing import image
 
 import mongodb_handler
-from model_utils import extract_features, train_resnet50_model
-from keras.preprocessing import image
+from model_utils import train_resnet50_model
 
 # Load the .env file
 load_dotenv()
@@ -22,6 +26,7 @@ PRODUCT_EXCHANGE = os.getenv('PRODUCT_EXCHANGE')
 SCHEDULE_EXCHANGE = os.getenv('SCHEDULE_EXCHANGE')
 PRODUCT_ROUTING_KEY = os.getenv('PRODUCT_ROUTING_KEY')
 SCHEDULE_ROUTING_KEY = os.getenv('SCHEDULE_ROUTING_KEY')
+PRODUCT_SERVICE_URL = os.getenv('PRODUCT_SERVICE_URL')
 
 # Assuming you have a list of image paths and corresponding product IDs
 product_ids = []  # list of product IDs
@@ -48,7 +53,9 @@ def setup_rabbitmq_consumer():
         # Schedule consumer
         channel.queue_bind(exchange=SCHEDULE_EXCHANGE, queue=SCHEDULE_QUEUE, routing_key=SCHEDULE_ROUTING_KEY)
         channel.basic_consume(queue=SCHEDULE_QUEUE, on_message_callback=handle_schedule_trigger, auto_ack=True)
-
+        channel.basic_publish(exchange=SCHEDULE_EXCHANGE,
+                              routing_key=SCHEDULE_ROUTING_KEY,
+                              body='train')
         print('Listening for messages...')
         channel.start_consuming()
     except Exception as e:
@@ -56,43 +63,86 @@ def setup_rabbitmq_consumer():
               f"the host is correct.")
         print(f"Error: {e}")
 
+
 def handle_product_update(ch, method, properties, body):
     message = json.loads(body)
     product_id = message['id']
-    images = message['images']
     action = message['op']
+    print(f"Received message: [product_id: {product_id}]")
+
     if action == 'd':
         mongodb_handler.mark_for_deletion(product_id)
     else:
-        mongodb_handler.save_for_later_processing(product_id, images, action)
+        mongodb_handler.save_for_later_processing(product_id)
     print(f"Processed update for product ID: {product_id} with action: {action}")
+
+
+def get_uuid():
+    return str(uuid.uuid4())
 
 
 def handle_schedule_trigger(ch, method, properties, body):
     global product_ids, product_features
 
     # get product not trained
-    products = mongodb_handler.get_untrained_products()
-    count = products.count()
+    # products = mongodb_handler.get_untrained_products()
+    # products = get_detail_product([str(product['product_id']) for product in products])
+    # count_trained = mongodb_handler.count_trained_products()
+    # count = len(products) + count_trained
+    #
+    # features = []
+    # labels = []
+    # for product in products:
+    #     images = product['images']
+    #     print('Handle for product: ', product['id'])
+    #     for img in images:
+    #         features.append(load_and_preprocess_images(img))
+    #         labels.append(product['id'])  # Assuming the label for each image is stored in the product
+    #
+    # features = np.vstack(features)
+    # labels = np.array(labels)
+    # # Train the model with the extracted features
+    # print('Starting train model...!')
+    # train_resnet50_model(features, labels, count)
+    #
+    # # mongodb_handler.update_product_as_trained([str(product['product_id']) for product in products])
+    # mongodb_handler.update_product_as_trained(products)
+    # print('Model trained successfully!')
+    #
+    # setup()
+
     features = []
     labels = []
-    uuid = str(uuid.uuid4())
-    for product in products:
-        images = product['images']
-        for img in images:
-            img_path = f'{uuid}.jpg'  # Save the image temporarily
-            img.save(img_path)
-            features.append(load_and_preprocess_images(img_path))
-            labels.append(product['product_id'])  # Assuming the label for each image is stored in the product
-            os.remove(img_path)  # Clean up the temporary image
 
-    features = np.vstack(features)
-    labels = np.array(labels)
     # Train the model with the extracted features
-    train_resnet50_model(features, labels, count)
+    print('Starting train model...!')
+    count = 0
+    # for folder_name in get_folder_names('img'):
+    #     for img_name in get_file_names('img/' + folder_name):
+    #         img_path = 'img/' + folder_name + '/' + img_name
+    #         img = Image.open(img_path)
+    #         img = img.convert('RGB')  # Convert image to RGB format
+    #         img = img.resize((224, 224))  # Resize the image
+    #         img_array = image.img_to_array(img)
+    #         img_array = np.expand_dims(img_array, axis=0)
+    #         features.append(img_array)
+    #         labels.append(folder_name)
+    #         count += 1
+    #
+    # features = np.vstack(features)
+    # labels = np.array(labels)
+
+    total = 0
+    for folder_name in get_folder_names('img'):
+        total += len(get_file_names('img/' + folder_name))
+
+    # Train the model with the extracted features
+    print('Load dataset successfully!')
+    train_resnet50_model(total,
+                         len(get_folder_names('img')))
 
     # mongodb_handler.update_product_as_trained([str(product['product_id']) for product in products])
-    mongodb_handler.update_product_as_trained(products)
+    # mongodb_handler.update_product_as_trained(products)
     print('Model trained successfully!')
 
     setup()
@@ -119,8 +169,43 @@ def setup():
     product_features = np.array([product['images'] for product in products])
 
 
-def load_and_preprocess_images(image_path):
-    img = image.load_img(image_path, target_size=(224, 224))
+def load_and_preprocess_images(url):
+    img = load_image_from_url(url)
+    img = img.convert('RGB')  # Convert image to RGB format
+    img = img.resize((224, 224))  # Resize the image
     img_array = image.img_to_array(img)
     img_array = np.expand_dims(img_array, axis=0)
     return img_array
+
+
+def get_detail_product(product_ids):
+    response = requests.post(f'{PRODUCT_SERVICE_URL}/products-es-multiple', headers={
+        "Content-Type": "application/json"
+    }, json={"product_ids": product_ids})
+
+    if response.status_code != 200:
+        print("Failed to fetch product details")
+        return None
+
+    return response.json()
+
+
+def load_image_from_url(url):
+    response = requests.get(url)
+    return Image.open(BytesIO(response.content))
+
+
+def download_image(url, filename):
+    response = requests.get(url)
+    with open(filename, 'wb') as f:
+        f.write(response.content)
+
+
+def get_folder_names(directory):
+    return [name for name in os.listdir(directory) if
+            os.path.isdir(os.path.join( directory, name))]
+
+
+def get_file_names(directory):
+    return [name for name in os.listdir(directory) if
+            os.path.isfile(os.path.join(directory, name))]
